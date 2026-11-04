@@ -23,6 +23,5 @@ jobs:
 
       - name: Run checkin
         env:
-          VT_EMAIL: ${{ secrets.VT_EMAIL }}
-          VT_PASSWORD: ${{ secrets.VT_PASSWORD }}
+          VT_ACCOUNTS: ${{ secrets.VT_ACCOUNTS }}
         run: python checkin.py

@@ -1,12 +1,12 @@
-# ViewTurbo 每日自动签到
+﻿# ViewTurbo 每日自动签到
 
-GitHub Actions 定时任务，每天自动签到领 100MB 流量。
+GitHub Actions 定时任务，每天自动签到领 100MB 流量。支持多账号。
 
 ## 原理
 
 | 步骤 | 接口 | 方法 |
 |------|------|------|
-| 登录 | `POST /appuser/reglogin` | `{"email":"…","password":"<MD5>"}` |
+| 登录 | `POST /appuser/reglogin` | `{"email":"...","password":"<MD5>"}` |
 | 签到 | `POST /appuser/checkin` | `{}` |
 
 - API 域名：`api.viewturbo.info`（多域名自动降级）
@@ -15,13 +15,18 @@ GitHub Actions 定时任务，每天自动签到领 100MB 流量。
 
 ## 配置
 
-仓库 Secrets 已设置：
-- `VT_EMAIL` — 登录邮箱
-- `VT_PASSWORD` — 登录密码（明文，脚本自动 MD5）
+仓库 Secret `VT_ACCOUNTS` 存 JSON 数组：
+
+```json
+[
+  {"email":"account1@example.com","password":"pass1"},
+  {"email":"account2@example.com","password":"pass2"}
+]
+```
 
 ## 手动触发
 
-在 GitHub 仓库 → Actions → ViewTurbo Daily Checkin → Run workflow
+GitHub 仓库 → Actions → ViewTurbo Daily Checkin → Run workflow
 
 ## 执行时间
 

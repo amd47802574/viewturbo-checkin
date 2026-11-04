@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-ViewTurbo 每日自动签到 — GitHub Actions 版
-登录 → 签到 → 输出结果
+ViewTurbo 每日自动签到 — GitHub Actions 版（多账号）
+从 VT_ACCOUNTS 环境变量读取 JSON 账号列表，逐个登录签到。
+格式: [{"email":"...","password":"..."}, ...]
 """
 
 import os
@@ -11,14 +12,12 @@ import hashlib
 import requests
 from datetime import datetime
 
-# API 基础域名（多域名容灾，依次降级）
 API_BASES = [
     "https://api.viewturbo.info",
     "https://api.mambo-mambo.com",
     "https://api.vpn-test.org",
 ]
 
-# 公共 query 参数
 COMMON_QS = "platform=web&cur_version=0.0.0&token={token}&deviceinfo=&lang=hk&code=Others"
 
 
@@ -32,7 +31,6 @@ def md5(text):
 
 
 def api_call(path, method="GET", body=None, token=""):
-    """带多域名降级的 API 请求"""
     for base in API_BASES:
         url = f"{base}{path}?{COMMON_QS.format(token=token)}"
         try:
@@ -48,55 +46,79 @@ def api_call(path, method="GET", body=None, token=""):
     return None
 
 
-def main():
-    email = os.environ.get("VT_EMAIL", "")
-    password = os.environ.get("VT_PASSWORD", "")
-
-    if not email or not password:
-        log("错误: 缺少环境变量 VT_EMAIL 或 VT_PASSWORD")
-        sys.exit(1)
-
-    log("===== ViewTurbo 签到开始 =====")
+def checkin_one(email, password):
+    """单个账号签到，返回 (success, message)"""
+    log(f"--- 账号: {email} ---")
 
     # 1. 登录
-    log(f"正在登录 {email} ...")
     md5_pass = md5(password)
     login_body = json.dumps({"email": email, "password": md5_pass})
     login_resp = api_call("/appuser/reglogin", method="POST", body=login_body)
 
     if not login_resp or login_resp.get("code") != 0:
         msg = login_resp.get("msg", "无响应") if login_resp else "无响应"
-        log(f"登录失败: {msg}")
-        sys.exit(1)
+        log(f"❌ 登录失败: {msg}")
+        return False, f"{email}: 登录失败 - {msg}"
 
     token = login_resp.get("data", {}).get("token", "")
     if not token:
-        log(f"登录失败: 返回中无 token。响应: {json.dumps(login_resp, ensure_ascii=False)}")
-        sys.exit(1)
-    log("登录成功，已获取 token。")
+        log("❌ 登录失败: 返回中无 token")
+        return False, f"{email}: 无 token"
 
-    # 2. 查签到状态
-    status_resp = api_call("/appuser/checkin_status", method="GET", token=token)
-    if status_resp and status_resp.get("code") == 0:
-        log(f"签到前状态: {json.dumps(status_resp.get('data'), ensure_ascii=False)}")
+    log("登录成功")
 
-    # 3. 执行签到
-    log("正在签到 ...")
+    # 2. 签到
     checkin_resp = api_call("/appuser/checkin", method="POST", body="{}", token=token)
 
     if checkin_resp and checkin_resp.get("code") == 0:
-        log(f"✅ 签到成功! 返回: {json.dumps(checkin_resp, ensure_ascii=False)}")
+        data = checkin_resp.get("data", {})
+        reward = data.get("reward_display", "?")
+        consecutive = data.get("consecutive", "?")
+        log(f"✅ 签到成功! 连续 {consecutive} 天, 本次奖励 {reward}")
+        return True, f"{email}: 签到成功, 奖励 {reward}"
     else:
         code = checkin_resp.get("code") if checkin_resp else "N/A"
         msg = checkin_resp.get("msg", "无响应") if checkin_resp else "无响应"
-        log(f"⚠️ 签到返回: code={code} msg={msg} (可能是今天已签到，属正常)")
+        log(f"⚠️ 签到返回: code={code} msg={msg}")
+        # 今天已签到也算成功
+        if "已签到" in msg:
+            return True, f"{email}: 今天已签到"
+        return False, f"{email}: {msg}"
 
-    # 4. 查签到后状态
-    status_resp2 = api_call("/appuser/checkin_status", method="GET", token=token)
-    if status_resp2 and status_resp2.get("code") == 0:
-        log(f"签到后状态: {json.dumps(status_resp2.get('data'), ensure_ascii=False)}")
 
-    log("===== 签到结束 =====")
+def main():
+    accounts_json = os.environ.get("VT_ACCOUNTS", "")
+
+    if not accounts_json:
+        log("错误: 缺少环境变量 VT_ACCOUNTS")
+        sys.exit(1)
+
+    try:
+        accounts = json.loads(accounts_json)
+    except json.JSONDecodeError as e:
+        log(f"错误: VT_ACCOUNTS JSON 解析失败: {e}")
+        sys.exit(1)
+
+    log(f"===== ViewTurbo 签到开始 ({len(accounts)} 个账号) =====")
+
+    results = []
+    for i, acc in enumerate(accounts):
+        email = acc.get("email", "")
+        password = acc.get("password", "")
+        if not email or not password:
+            log(f"⚠️ 账号 {i+1} 缺少 email 或 password，跳过")
+            continue
+        ok, msg = checkin_one(email, password)
+        results.append((ok, msg))
+        log("")
+
+    # 汇总
+    success = sum(1 for ok, _ in results if ok)
+    fail = len(results) - success
+    log(f"===== 签到结束: {success} 成功, {fail} 失败 =====")
+
+    if fail > 0:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
